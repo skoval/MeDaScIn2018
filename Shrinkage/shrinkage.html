@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Part 4. Hierarchical Models &amp; Shrinkage</title>
+    <meta charset="utf-8">
+    <meta name="author" content="MeDaScIn 2018" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link rel="stylesheet" href="duke_color_pallettes_slides.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Part 4. Hierarchical Models &amp; Shrinkage
+## Sports Analytics with R
+### MeDaScIn 2018
+
+---
+
+
+
+
+
+
+
+# Hierarchies
+
+
+&lt;b&gt;Hierarchies are abundant in sports data.&lt;/b&gt;
+
+![](hierarchy.png)
+
+---
+
+# Why Hierarchies Matter
+
+.pull-left[
+- Observations that are 'grouped' tend to correlate 
+
+- But standard models treat observations as independent
+
+- We need special models to account for dependence in hierarchical data
+]
+
+.pull-right[
+![](joey.gif)
+]
+
+--
+
+&lt;br&gt;
+
+Let's look at an example with tennis serve outcomes...
+
+---
+
+# Tennis Serve
+
+The tennis serve is one of the most important skills in tennis. Why?
+
+![](tennis_serve.gif)
+
+
+---
+
+# The Serve Advantage
+
+![](shrinkage_files/figure-html/unnamed-chunk-1-1.png)&lt;!-- --&gt;
+
+---
+
+# Modelling Serve Win Outcomes
+
+Because of the importance of the serve in tennis, modelling serve performance becomes an important part of performance analysis
+
+--
+
+A good service model can help us to:
+
+- Set expectations of what a player is expected to do on serve
+
+- Determine if a player performed better or worse than expected
+
+- Identify factors that influence the serve performance
+
+---
+
+# Tennis Data
+
+The `deuce` package is a helpful resource for match, point, and shot-level data about tennis.
+
+It is available for download on GitHub.
+
+
+```r
+library(devtools)
+
+install_GitHub('skoval/deuce')
+```
+
+---
+
+# Service Data
+
+The data set `atp_matches` and `wta_matches` has match-level summaries of matches from 1968 to the present. 
+
+- Every row corresponds to one match
+
+- Statistics for the number of service points played and won are available from early 2000s to the present
+
+- The statistics are organised by match winner and loser (`svpt` is total service points, `1stWon` are first serves won, `2ndWon` are second serves won)
+
+
+```r
+data(atp_matches)
+
+tail(atp_matches %&gt;%
+    filter(tourney_level == "Grand Slams") %&gt;%
+    select(tourney_name, surface,  winner_name, 
+           loser_name, w_svpt, w_1stWon, w_2ndWon))
+```
+
+```
+##          tourney_name surface   winner_name      loser_name w_svpt
+## 24118 Australian Open    Hard   Kyle Edmund Grigor Dimitrov    124
+## 24119 Australian Open    Hard   Hyeon Chung Tennys Sandgren    107
+## 24120 Australian Open    Hard Roger Federer   Tomas Berdych     96
+## 24121 Australian Open    Hard   Marin Cilic     Kyle Edmund     89
+## 24122 Australian Open    Hard Roger Federer     Hyeon Chung     37
+## 24123 Australian Open    Hard Roger Federer     Marin Cilic    139
+##       w_1stWon w_2ndWon
+## 24118       60       19
+## 24119       57       16
+## 24120       50       19
+## 24121       45       22
+## 24122       15       15
+## 24123       67       32
+```
+
+---
+
+# 2017 Grand Slams
+
+Let's prepare data with men's service outcomes for the 2017 Grand Slams
+
+
+```r
+slams_2017 &lt;- atp_matches %&gt;%
+    filter(year == 2017, tourney_level == "Grand Slams") %&gt;%
+    select(tourney_name, surface, 
+           winner_name, w_svpt, w_1stWon, w_2ndWon,
+           loser_name, l_svpt, l_1stWon, l_2ndWon) %&gt;%
+    dplyr::mutate(
+      w_servewon = w_1stWon + w_2ndWon,
+      l_servewon = l_1stWon + l_2ndWon
+    )
+
+winner &lt;- loser &lt;- slams_2017
+
+names(winner) &lt;- sub("winner|w_", "player", names(winner))
+names(loser) &lt;- sub("loser|l_", "player", names(loser))
+
+names(loser) &lt;- sub("winner|w_", "opponent", names(loser))
+names(winner) &lt;- sub("loser|l_", "opponent", names(winner))
+
+slams_2017 &lt;- rbind(winner, loser)
+```
+
+---
+
+
+# Any Hierarchies?
+
+Yes, there are different matches and number of service points across players.
+
+
+```r
+slams_2017 %&gt;%
+  group_by(player_name) %&gt;%
+  dplyr::summarise(
+    matches = n()
+  ) %&gt;%
+  ggplot(aes(x = player_name, y = matches)) + 
+  geom_bar(stat = "identity", fill = "#e5952c") + 
+  coord_flip() + 
+  theme_hc() + 
+  scale_y_continuous("Matches") + 
+  scale_x_discrete("")
+```
+
+![](shrinkage_files/figure-html/unnamed-chunk-5-1.png)&lt;!-- --&gt;
+
+---
+
+# Grand Slam Serve Win
+
+Given these data, what might be a reasonable model for a player's service percentage won against a given opponent?
+
+--
+
+We will consider a model that includes the following factors:
+
+- Player average serve ability
+
+- Opponent's average return ability
+
+- Surface
+
+---
+
+
+# Model Notation
+
+
+$$
+p_{ij} = \beta + \beta_1 grass + \beta_2 clay + a_i + b_j
+$$
+- `\(p_{ij}\)` service proportion won for server `\(i\)` vs receiver `\(j\)`
+
+- `\(\beta\)` intercept/surface effects
+
+- `\(a_i\)` is a server effect
+
+- `\(b_j\)` is the receiver effect
+
+---
+
+# Fitting a Hierarchical Model
+
+There are two main approaches:
+
+- Likelihood-based
+
+- Bayesian
+
+---
+
+# Likelihood-Based
+
+We can use the `lme4` package for fitting hierarchical models for exponential family distributions. Below is a binomial logistic model for the serve win proportion. 
+
+
+```r
+library(lme4) # Linear mixed effects
+
+fit &lt;- glmer(
+  cbind(playerservewon, playersvpt - playerservewon) ~
+    I(surface == "Grass") + 
+    I(surface == "Clay") + 
+    (1 | player_name) +
+    (1 | opponent_name),
+  data = slams_2017,
+  family = "binomial"
+)
+```
+
+---
+
+# Likelihood-Based
+
+- Outcomes are given as a matrix of the count of success and failures
+
+- Normal random effects for a `group` variable are given as `(1 | group)`
+
+- The default link for `binomial` is the logit link
+
+---
+
+# Summarising Model
+
+The fixed effects our the `betas` of the model and tell us about the average serve expectations on different surfaces on the log-odds scale
+
+
+```r
+summary(fit)
+```
+
+```
+## Generalized linear mixed model fit by maximum likelihood (Laplace
+##   Approximation) [glmerMod]
+##  Family: binomial  ( logit )
+## Formula: 
+## cbind(playerservewon, playersvpt - playerservewon) ~ I(surface ==  
+##     "Grass") + I(surface == "Clay") + (1 | player_name) + (1 |  
+##     opponent_name)
+##    Data: slams_2017
+## 
+##      AIC      BIC   logLik deviance df.resid 
+##   7060.7   7085.3  -3525.3   7050.7     1011 
+## 
+## Scaled residuals: 
+##     Min      1Q  Median      3Q     Max 
+## -3.2731 -0.7203  0.0140  0.7383  2.8723 
+## 
+## Random effects:
+##  Groups        Name        Variance Std.Dev.
+##  player_name   (Intercept) 0.03281  0.1811  
+##  opponent_name (Intercept) 0.02457  0.1567  
+## Number of obs: 1016, groups:  player_name, 193; opponent_name, 193
+## 
+## Fixed effects:
+##                           Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)                0.53550    0.02132  25.113  &lt; 2e-16 ***
+## I(surface == "Grass")TRUE  0.11900    0.01763   6.748 1.49e-11 ***
+## I(surface == "Clay")TRUE  -0.02464    0.01768  -1.394    0.163    
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+## 
+## Correlation of Fixed Effects:
+##             (Intr) I(=="G
+## I(=="G")TRU -0.255       
+## I(=="C")TRU -0.264  0.322
+```
+
+
+---
+
+
+# Serve Win on Hard Court Serve 
+
+The average effect on hard court on the probability scale can be easily computed along with a confidence interval. 
+
+
+
+```r
+expit &lt;- function(x) exp(x) / (1 + exp(x)) # Inverse logit
+
+expit(fixef(fit)[1])
+```
+
+```
+## (Intercept) 
+##   0.6307646
+```
+
+```r
+expit(confint(fit, "(Intercept)"))
+```
+
+```
+##                 2.5 %    97.5 %
+## (Intercept) 0.6209676 0.6404924
+```
+
+
+---
+
+# How Do Servers Differ from the Average?
+
+Empirical Bayes estimates of server effects can be obtained from the `ranef` function. Below we put these into a dataframe and mutate to be on the probability scale.
+
+
+```r
+player_effects &lt;- ranef(fit) # ranef.mer object
+
+player_effects &lt;- data.frame(
+    serve_effect = expit(player_effects[["player_name"]][,1] + fixef(fit)[1]) - expit(fixef(fit)[1]),
+    player_name = rownames(player_effects[["player_name"]]),
+    stringsAsFactors = F
+)
+```
+
+
+---
+
+
+# How Does this Compare with the Observed?
+
+To make a visual comparison, we can obtain the averages per player on hard court (our reference surface) and see how that deviates from the estimated average
+
+
+```r
+observed_effects &lt;- slams_2017 %&gt;%
+  filter(surface == "Hard") %&gt;%
+  group_by(player_name) %&gt;%
+  dplyr::summarise(
+    matches = n(),
+    serve_effect = mean(playerservewon / playersvpt) - expit(fixef(fit)[1])
+  )
+
+combine &lt;- observed_effects %&gt;%
+  inner_join(player_effects, by = "player_name")
+```
+
+
+---
+
+# How Does this Compare with the Observed?
+
+![](shrinkage_files/figure-html/unnamed-chunk-11-1.png)&lt;!-- --&gt;
+
+
+---
+
+# What's Going On?
+
+- Our esimtates are generally closer to the average (zero line) than the observed
+
+--
+
+- This is most true for players with fewer matches
+
+--
+
+- This phenomenon is known as 'shrinkage' 
+
+--
+
+- Shrinking less certain observations to the mean is a natural byproduct of hierarchical models
+
+
+---
+
+# James-Stein Shrinkage
+
+The 'OG' of shrinkage estimators was the 1961 estimator proposed by Willard James and Charles Stein. The general form of this and other shrinkage estimators, for some shrinkage weight `\(B\)`, is:
+
+$$
+\hat{x}_i = \bar{x}_i + B (\bar{x} -\bar{x}_i)
+$$
+
+- `\(\bar{x}_i\)` is the average we observe
+
+- `\(\bar{x}\)` is the global average
+
+- `\(B\)` is a weight that is closer to 1 when `\(\bar{x}_i\)` is less certain
+
+---
+
+# Sport Has Been a Huge Motivator for Shrinkage Estimation
+
+![](james-stein.png)
+
+---
+
+# Bayesian Hierarchies
+
+We can also fit a Bayesian hierarchical model to estimate server win expectations. The Bayesian framework has the advantage that:
+
+- We can incorporate subjective information with the prior
+
+- We have more flexibility in the structure and distribution of group factors
+
+- It is easy to derive summaries for functions of the model parameters
+
+--
+
+* Some criticse Bayes for using priors and being too computational intensive
+
+---
+
+# Bayesian Model
+
+With Bayesian models, we need to specify distributions for our outcome _and_ parameters. 
+
+$$
+p_{ij} = \beta + \beta_1 grass + \beta_2 clay + a_i + b_j
+$$
+
+
+`$$y_{ij} \sim Binomial(p_{ij}, n_{ij})$$`
+
+`$$\boldsymbol{\beta} \sim MVN(\mu_\beta, \Sigma_\beta)$$`
+`$$a_i \sim N(0, \sigma_a^2)$$`
+
+`$$b_j \sim N(0, \sigma_b^2)$$`
+
+In this example we will use non-informative priors for all of the hyperparameters above.
+
+---
+
+# Implementing in `rjags`
+
+`rjags` is a popular package for implementing Bayesian inference with Gibbs sampling.
+
+
+```r
+library(rjags)
+
+modelString = "
+  model{
+
+    for(i in 1:N) {   
+
+      servewon[i] ~ dbinom(p[i], n[i])
+	  
+      logit(p[i]) &lt;- beta[1] + beta[2] * grass[i] + beta[3] * clay[i] + a[j[i]] + b[k[i]]
+      }
+      
+     for(l in 1:J){
+      a[l] ~ dnorm(0, tau.sigma.a)
+     }
+	
+     for(l in 1:K){
+      b[l] ~ dnorm(0, tau.sigma.b)
+     }
+
+ 	  tau.sigma.a &lt;- pow(sigma.a, -2)
+ 	  sigma.a ~ dunif(0, 100)
+
+ 	  tau.sigma.b &lt;- pow(sigma.b, -2)
+ 	  sigma.b ~ dunif(0, 100)
+  
+    beta[1:3] ~ dmnorm(mean[1:3], prec[1:3 , 1:3])
+    Tau.B[1:3 , 1:3] ~ dwish(Omega[1:3, 1:3], 3)  
+}
+"
+```
+
+---
+
+# Prepare Data
+
+Below we set up our indices and hyperparameter constants.
+
+
+```r
+N &lt;- nrow(slams_2017)
+
+j &lt;- rep(0, N)
+
+counter &lt;- 0
+
+for (k in unique(slams_2017$player_name)){
+  l &lt;- (slams_2017$player_name == k)
+  counter &lt;- counter + 1
+  j[l] &lt;- counter
+}
+
+k &lt;- rep(0, N)
+
+counter &lt;- 0
+
+for (x in unique(slams_2017$opponent_name)){
+  l &lt;- (slams_2017$opponent_name == x)
+  counter &lt;- counter + 1
+  k[l] &lt;- counter
+}
+
+mean &lt;-  c(0, 0, 0)
+
+Omega &lt;- diag(c(.1,.1,.1))
+
+prec &lt;- diag(c(1.0E-6,1.0E-6,1.0E-6))
+
+J &lt;- length(unique(slams_2017$player_name))
+K &lt;- length(unique(slams_2017$opponent_name))
+```
+
+---
+
+# Run the JAGS model
+
+Use the `jags.model` to run the model for our sample data and set the number of chains and adaptation length.
+
+
+```r
+jags &lt;- jags.model(textConnection(modelString),
+                   data = list('servewon' = slams_2017$playerservewon, 
+                               'n' = slams_2017$playersvpt,
+                               'grass' =  as.numeric(slams_2017$surface == "Grass"),
+                               'clay' =  as.numeric(slams_2017$surface == "Clay"),
+                               'j' = j, 
+                               'k' = k, 
+                        'N' = N,
+                        'J' = J, 
+                        'K' = K, 
+                        'mean' = mean,
+                        'Omega' = Omega,
+                        'prec' = prec),
+                   n.chains = 3,
+                   n.adapt = 1000)
+```
+
+```
+## Compiling model graph
+##    Resolving undeclared variables
+##    Allocating nodes
+## Graph information:
+##    Observed stochastic nodes: 1016
+##    Unobserved stochastic nodes: 390
+##    Total graph size: 8940
+## 
+## Initializing model
+## 
+## 
+  |                                                        
+  |                                                  |   0%
+  |                                                        
+  |+                                                 |   2%
+  |                                                        
+  |++                                                |   4%
+  |                                                        
+  |+++                                               |   6%
+  |                                                        
+  |++++                                              |   8%
+  |                                                        
+  |+++++                                             |  10%
+  |                                                        
+  |++++++                                            |  12%
+  |                                                        
+  |+++++++                                           |  14%
+  |                                                        
+  |++++++++                                          |  16%
+  |                                                        
+  |+++++++++                                         |  18%
+  |                                                        
+  |++++++++++                                        |  20%
+  |                                                        
+  |+++++++++++                                       |  22%
+  |                                                        
+  |++++++++++++                                      |  24%
+  |                                                        
+  |+++++++++++++                                     |  26%
+  |                                                        
+  |++++++++++++++                                    |  28%
+  |                                                        
+  |+++++++++++++++                                   |  30%
+  |                                                        
+  |++++++++++++++++                                  |  32%
+  |                                                        
+  |+++++++++++++++++                                 |  34%
+  |                                                        
+  |++++++++++++++++++                                |  36%
+  |                                                        
+  |+++++++++++++++++++                               |  38%
+  |                                                        
+  |++++++++++++++++++++                              |  40%
+  |                                                        
+  |+++++++++++++++++++++                             |  42%
+  |                                                        
+  |++++++++++++++++++++++                            |  44%
+  |                                                        
+  |+++++++++++++++++++++++                           |  46%
+  |                                                        
+  |++++++++++++++++++++++++                          |  48%
+  |                                                        
+  |+++++++++++++++++++++++++                         |  50%
+  |                                                        
+  |++++++++++++++++++++++++++                        |  52%
+  |                                                        
+  |+++++++++++++++++++++++++++                       |  54%
+  |                                                        
+  |++++++++++++++++++++++++++++                      |  56%
+  |                                                        
+  |+++++++++++++++++++++++++++++                     |  58%
+  |                                                        
+  |++++++++++++++++++++++++++++++                    |  60%
+  |                                                        
+  |+++++++++++++++++++++++++++++++                   |  62%
+  |                                                        
+  |++++++++++++++++++++++++++++++++                  |  64%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++                 |  66%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++                |  68%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++               |  70%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++              |  72%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++++             |  74%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++++            |  76%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++++++           |  78%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++++++          |  80%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++++++++         |  82%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++++++++        |  84%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++++++++++       |  86%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++++++++++      |  88%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++++++++++++     |  90%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++++++++++++    |  92%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++++++++++++++   |  94%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++++++++++++++  |  96%
+  |                                                        
+  |+++++++++++++++++++++++++++++++++++++++++++++++++ |  98%
+  |                                                        
+  |++++++++++++++++++++++++++++++++++++++++++++++++++| 100%
+```
+
+---
+
+# Assessing Convergence
+
+Trace plots and Gelman-Rubin stats are common diagnostics for posterior convergence. Here is an example with the intercept parameter.
+
+
+```r
+samples &lt;- coda.samples(jags,
+                        c('beta[1]'),
+                        1000)
+```
+
+```
+## 
+  |                                                        
+  |                                                  |   0%
+  |                                                        
+  |*                                                 |   2%
+  |                                                        
+  |**                                                |   4%
+  |                                                        
+  |***                                               |   6%
+  |                                                        
+  |****                                              |   8%
+  |                                                        
+  |*****                                             |  10%
+  |                                                        
+  |******                                            |  12%
+  |                                                        
+  |*******                                           |  14%
+  |                                                        
+  |********                                          |  16%
+  |                                                        
+  |*********                                         |  18%
+  |                                                        
+  |**********                                        |  20%
+  |                                                        
+  |***********                                       |  22%
+  |                                                        
+  |************                                      |  24%
+  |                                                        
+  |*************                                     |  26%
+  |                                                        
+  |**************                                    |  28%
+  |                                                        
+  |***************                                   |  30%
+  |                                                        
+  |****************                                  |  32%
+  |                                                        
+  |*****************                                 |  34%
+  |                                                        
+  |******************                                |  36%
+  |                                                        
+  |*******************                               |  38%
+  |                                                        
+  |********************                              |  40%
+  |                                                        
+  |*********************                             |  42%
+  |                                                        
+  |**********************                            |  44%
+  |                                                        
+  |***********************                           |  46%
+  |                                                        
+  |************************                          |  48%
+  |                                                        
+  |*************************                         |  50%
+  |                                                        
+  |**************************                        |  52%
+  |                                                        
+  |***************************                       |  54%
+  |                                                        
+  |****************************                      |  56%
+  |                                                        
+  |*****************************                     |  58%
+  |                                                        
+  |******************************                    |  60%
+  |                                                        
+  |*******************************                   |  62%
+  |                                                        
+  |********************************                  |  64%
+  |                                                        
+  |*********************************                 |  66%
+  |                                                        
+  |**********************************                |  68%
+  |                                                        
+  |***********************************               |  70%
+  |                                                        
+  |************************************              |  72%
+  |                                                        
+  |*************************************             |  74%
+  |                                                        
+  |**************************************            |  76%
+  |                                                        
+  |***************************************           |  78%
+  |                                                        
+  |****************************************          |  80%
+  |                                                        
+  |*****************************************         |  82%
+  |                                                        
+  |******************************************        |  84%
+  |                                                        
+  |*******************************************       |  86%
+  |                                                        
+  |********************************************      |  88%
+  |                                                        
+  |*********************************************     |  90%
+  |                                                        
+  |**********************************************    |  92%
+  |                                                        
+  |***********************************************   |  94%
+  |                                                        
+  |************************************************  |  96%
+  |                                                        
+  |************************************************* |  98%
+  |                                                        
+  |**************************************************| 100%
+```
+
+```r
+plot(samples) # Trace plot
+```
+
+![](shrinkage_files/figure-html/unnamed-chunk-15-1.png)&lt;!-- --&gt;
+
+```r
+gelman.plot(samples) # Gelman chain similarity
+```
+
+![](shrinkage_files/figure-html/unnamed-chunk-15-2.png)&lt;!-- --&gt;
+
+---
+
+# Summarising Posteriors 
+
+Let's take one chain of results to summarise the overall and player serve variables.
+
+
+```r
+server &lt;- coda.samples(jags,
+                        c('a'),
+                        1000)
+```
+
+```
+## 
+  |                                                        
+  |                                                  |   0%
+  |                                                        
+  |*                                                 |   2%
+  |                                                        
+  |**                                                |   4%
+  |                                                        
+  |***                                               |   6%
+  |                                                        
+  |****                                              |   8%
+  |                                                        
+  |*****                                             |  10%
+  |                                                        
+  |******                                            |  12%
+  |                                                        
+  |*******                                           |  14%
+  |                                                        
+  |********                                          |  16%
+  |                                                        
+  |*********                                         |  18%
+  |                                                        
+  |**********                                        |  20%
+  |                                                        
+  |***********                                       |  22%
+  |                                                        
+  |************                                      |  24%
+  |                                                        
+  |*************                                     |  26%
+  |                                                        
+  |**************                                    |  28%
+  |                                                        
+  |***************                                   |  30%
+  |                                                        
+  |****************                                  |  32%
+  |                                                        
+  |*****************                                 |  34%
+  |                                                        
+  |******************                                |  36%
+  |                                                        
+  |*******************                               |  38%
+  |                                                        
+  |********************                              |  40%
+  |                                                        
+  |*********************                             |  42%
+  |                                                        
+  |**********************                            |  44%
+  |                                                        
+  |***********************                           |  46%
+  |                                                        
+  |************************                          |  48%
+  |                                                        
+  |*************************                         |  50%
+  |                                                        
+  |**************************                        |  52%
+  |                                                        
+  |***************************                       |  54%
+  |                                                        
+  |****************************                      |  56%
+  |                                                        
+  |*****************************                     |  58%
+  |                                                        
+  |******************************                    |  60%
+  |                                                        
+  |*******************************                   |  62%
+  |                                                        
+  |********************************                  |  64%
+  |                                                        
+  |*********************************                 |  66%
+  |                                                        
+  |**********************************                |  68%
+  |                                                        
+  |***********************************               |  70%
+  |                                                        
+  |************************************              |  72%
+  |                                                        
+  |*************************************             |  74%
+  |                                                        
+  |**************************************            |  76%
+  |                                                        
+  |***************************************           |  78%
+  |                                                        
+  |****************************************          |  80%
+  |                                                        
+  |*****************************************         |  82%
+  |                                                        
+  |******************************************        |  84%
+  |                                                        
+  |*******************************************       |  86%
+  |                                                        
+  |********************************************      |  88%
+  |                                                        
+  |*********************************************     |  90%
+  |                                                        
+  |**********************************************    |  92%
+  |                                                        
+  |***********************************************   |  94%
+  |                                                        
+  |************************************************  |  96%
+  |                                                        
+  |************************************************* |  98%
+  |                                                        
+  |**************************************************| 100%
+```
+
+```r
+server_effects &lt;- 
+  expit(server[[1]] + matrix(samples[[1]], nrow = 1000, ncol = ncol(server[[1]]))) - 
+          expit( matrix(samples[[1]], nrow = 1000, ncol = ncol(server[[1]])))
+
+server_effects &lt;- colMeans(server_effects) # Posterior mean
+
+server_effects &lt;- data.frame(
+    serveid = str_extract(names(server_effects), "[0-9]+"),
+    serve_effect = server_effects,
+    stringsAsFactors = F
+)
+```
+
+---
+
+# Compare to Observed
+
+
+```r
+slams_2017$serveid &lt;- as.character(j)
+
+observed_effects &lt;- slams_2017 %&gt;%
+  group_by(serveid) %&gt;%
+  dplyr::summarise(
+    matches = n(),
+    serve_effect = mean(playerservewon / playersvpt) - mean(expit(samples[[1]]))
+  )
+
+combine &lt;- observed_effects %&gt;%
+  inner_join(server_effects, by = "serveid")
+
+combine %&gt;%
+    ggplot(aes(x = "Observed", xend = "Estimated", 
+               y = serve_effect.x, yend = serve_effect.y, group = serveid, col = matches)) + 
+  geom_hline(yintercept = 0, col = "red") + 
+  geom_segment() + 
+  theme_hc() + 
+  scale_y_continuous("Service Effect")
+```
+
+![](shrinkage_files/figure-html/unnamed-chunk-17-1.png)&lt;!-- --&gt;
+
+---
+
+# Summary
+
+- Hierarchical models are a common occurrence in sport
+
+- These models can be a natural way to introduce shrinkage to player-specific effects
+
+- There are easy-to-use, powerful tools for implementing likelihood-based and Bayesian hierarchical models in R 
+
+
+---
+
+
+# Resources
+
+- [lme4](https://www.jstatsoft.org/article/view/v067i01/v67i01.pdf)
+
+- https://martynplummer.wordpress.com/category/jags/
+
+- The BUGS Book: A Practical Introduction to Bayesian Analysis
+
+- http://www-math.bgsu.edu/~albert/bcwr/
+    </textarea>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "GitHub",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function() {
+  var d = document, s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})();</script>
+
+<script type="text/x-mathjax-config">
+MathJax.Hub.Config({
+  tex2jax: {
+    skipTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+  }
+});
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://cdn.bootcss.com/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

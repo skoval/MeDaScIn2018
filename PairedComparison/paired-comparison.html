@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Part 3. Paired Comparisons</title>
+    <meta charset="utf-8">
+    <meta name="author" content="MeDaScIn 2018" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link rel="stylesheet" href="duke_color_pallettes_slides.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Part 3. Paired Comparisons
+## Sports Analytics with R
+### MeDaScIn 2018
+
+---
+
+
+
+
+
+
+
+# Sport Competition
+
+Whether it's two individuals or two teams, most sport competition comes down to a paired comparison. 
+
+![](dog_surf.gif)
+
+---
+
+# Win Ability
+
+- The 'comparison' of main interest in sport is a competitors ability to win
+
+- How competitors have fared against each other gives us the most direct information about their respective win abilities
+
+- The family of `paired comparison models` are useful tools for estimating that ability 
+
+
+![](lebron.gif)
+
+---
+
+# Question: Abilities
+
+- Suppose we have two competitors who are going to face each other
+
+- Further suppose we know that Competitor A has ability `\(\delta_A\)` and Competitor B has ability `\(\delta_B\)` 
+
+- What properties of `\(\delta_A\)` and `\(\delta_B\)` would make us favor one competitor over another?
+
+--
+
+Answer: We should favor the competitor with greater ability.
+
+
+---
+
+# Bradely-Terry-Luce
+
+.cbox[
+### One of the most popular paired comparison models is the Bradley-Terry-Luce model.
+]
+
+- Bradley-Terry-Luce encapsulates the idea that competition results tell us about the underlying abilities of the competitors.
+
+- Relative ability is modeled as a logistic function of wins:
+
+&lt;br&gt;
+
+$$
+P(Win_A = 1) = \frac{\exp{(\delta_A - \delta_B)}}{1 + \exp{(\delta_A - \delta_B)}}
+$$
+
+---
+
+# BTL Properties
+
+- Win expectations all come down to the difference in abilities
+
+- An equal difference, `\(\delta_A - \delta_B\)`, implies the same win expectation no matter the individual abilities of `\(A\)` and `\(B\)`
+
+- Expectations are even when `\(\delta_A -\delta_B = 0\)`
+
+- Roughly +10% for every added difference in ability of 0.4
+
+---
+
+![](paired-comparison_files/figure-html/unnamed-chunk-1-1.png)&lt;!-- --&gt;
+
+---
+
+# BTL in R
+
+- `BradleyTerry2` (authors Turner and Firth) is an R package for fitting BTL models
+
+- It uses maximum-likelihood to estimate competitor abilities
+
+- It can incorporate covariates
+
+- Other binary families can also be fit
+
+
+```r
+install.packages("BradleyTerry2")
+```
+
+---
+
+# Function BTm
+
+The main workhorse function for the BTL model is `BTm`. Here is the general syntax:
+
+
+```r
+BTM(outcome, player1, player2, ...)
+```
+
+- `outcome` is with respect to `player1`
+
+- `player1` must be a factor with same levels as `player2`
+
+- `player2` must be a factor with same levels as `player1`
+
+Note: The `outcome` is with respect to `player1`.
+
+---
+
+
+# English Premier League
+
+We can download the current standings for the EPL from the [www.football-data.co.uk](www.football-data.co.uk)
+
+
+```r
+football &lt;- "http://www.football-data.co.uk/mmz4281/1718/E0.csv"
+
+data &lt;- read.csv(football, stringsAsFactors = FALSE)
+```
+
+---
+
+# EPL Data
+
+Each row is a summary of a particular EPL game. The variables of interest are:
+
+- HomeTeam: The name of the home team
+
+- AwayTeam: The name of the away team
+
+- FTHG: Goals scored by home team
+
+- FTAG: Goals scored by away team
+
+---
+
+# Example: Basic BTL
+
+Below we derive an indicator for wins and losses and then fit a BTL using the `BTm` function.
+
+
+```r
+library(BradleyTerry2)
+
+data &lt;- data %&gt;%
+  dplyr::mutate(
+    outcome = as.numeric(FTHG &gt; FTAG),
+    HomeTeam = factor(HomeTeam, levels = unique(c(HomeTeam, AwayTeam))),
+    AwayTeam = factor(AwayTeam, levels = levels(HomeTeam))
+  )
+
+
+
+fit &lt;- BTm(outcome, HomeTeam, AwayTeam, 
+           data = data)
+```
+
+---
+
+# BTm Methods
+
+The result of `BTm` has all of the standard methods of `glm` models.
+
+- `print` : Model summary and point estimates of coefficients
+
+
+- `summary`: More detailed summary of estimates (including standard errors)
+
+- `plots`: Residual diagnostic plots
+
+---
+
+
+# Abilities
+
+A useful function for extracting the abilities on the log scale is with the function `BTabilities`.
+
+
+```r
+abilities &lt;- BTabilities(fit) # Matrix of ability and StdErr
+
+abilities &lt;- data.frame(
+  Team = rownames(abilities),
+  Ability = abilities[,1],
+  SE = abilities[,2]
+)
+
+abilities$Team &lt;- factor(abilities$Team, 
+                        levels = abilities$Team[order(abilities$Ability)],
+                        order = T)
+```
+
+---
+
+![](paired-comparison_files/figure-html/unnamed-chunk-7-1.png)&lt;!-- --&gt;
+
+---
+
+# Question
+
+What are some of the shortcomings of our current model?
+
+--
+
+Some possibilities:
+
+- No home/away advantage
+
+- We treat ties as losses for Home team
+
+---
+
+# Home Advantage
+
+It is generally thought that a team gets a boost in their win expectations when playing at home. 
+
+To introduce a home advantage covariate, we need to restructure out dataset and add a covariate for each team factor. 
+
+
+```r
+data$Home &lt;- data.frame(
+  Team = data$HomeTeam, 
+  at.home = 1
+)
+
+data$Away &lt;- data.frame(
+  Team = data$AwayTeam, 
+  at.home = 0
+)
+```
+
+---
+
+# Home Advantage BTL
+
+Now we add the home advantage covariate (`at.home`) to the model, using the `formula` statement.
+
+
+
+```r
+fit &lt;- BTm(outcome, Home, Away, 
+           data = data,
+           id = "Team", 
+           formula = ~ Team + at.home
+           )
+```
+
+---
+
+# Problem
+
+1. What does the `at.home` effect suggest about the home advantage in the 2017-2018 EPL?
+
+2. How do the abilities change compared to our previous fit without this advantage?
+
+---
+
+# Solution: Home Advantage Estimate
+
+
+```r
+summary(fit)$coef["at.home",]
+```
+
+```
+##    Estimate  Std. Error     z value    Pr(&gt;|z|) 
+## -0.22472102  0.11565309 -1.94306103  0.05200879
+```
+
+---
+
+# Solution: Change In Abilities
+
+![](paired-comparison_files/figure-html/unnamed-chunk-11-1.png)&lt;!-- --&gt;
+
+---
+
+# Reverse Home Advantage?
+
+- Our results suggest that playing at home is actually a _disadvantage_.
+
+- This goes against all conventional thinking!
+
+- Could we have made a mistake somewhere?
+
+--
+
+It's because we haven't handled ties/draws properly and there are a lot of them.
+
+
+```r
+mean(data$FTHG == data$FTAG) # Frequency of draws
+```
+
+```
+## [1] 0.2605263
+```
+
+---
+
+# Problem: Effect of Ties
+
+- Fit a BTM + Home advantage excluding matches with ties
+
+- Determine the estimate of the home advantage
+
+- What do you conclude about the importance of handling ties for our model?
+
+---
+
+# Solution: Effect of Ties
+
+
+```r
+data$Home &lt;- data$Away &lt;- NULL
+
+data &lt;- data %&gt;% filter(FTHG != FTAG) # Remove ties
+
+data$Home &lt;- data.frame(
+  Team = data$HomeTeam, 
+  at.home = 1
+)
+
+data$Away &lt;- data.frame(
+  Team = data$AwayTeam, 
+  at.home = 0
+)
+
+fit &lt;- BTm(outcome, Home, Away, 
+           data = data,
+           id = "Team", 
+           formula = ~ Team + at.home
+           )
+
+summary(fit)$coef["at.home",]
+```
+
+```
+##     Estimate   Std. Error      z value     Pr(&gt;|z|) 
+## 7.113750e-01 1.595918e-01 4.457466e+00 8.293409e-06
+```
+
+---
+
+# Dynamic Paired Comparisons
+
+- Our example paired comparison model assumed that the ability of teams was constant
+
+- It might be more reasonable to allow the ability of teams/players to update with new results
+
+- In other words, we want a way to estimate team/player ability _dynamically_
+
+
+---
+
+# Elo System
+
+The 'Elo' system is the most popular dynamic paired comparison model. It was developed for chess in the 1950s but is now used for rating competitors in many sports. 
+
+![](538.png)
+
+---
+
+# Elo Example: Major League Baseball
+
+
+
+
+```
+## Warning: Removed 9 rows containing missing values (geom_path).
+```
+
+![](paired-comparison_files/figure-html/unnamed-chunk-14-1.png)&lt;!-- --&gt;
+
+---
+
+# Elo System
+
+The standard Elo system predicts game/match results based on the rating difference of the competitors:
+
+$$
+P_{ij} = 1 / (1 + 10^{(R_j - R_i)/400})
+$$
+ - This is a logistic prediction (using base 10 instead of e)
+ 
+ - The 400 is an artifact of Elo's original system and is usually 2 SD of the rating difference distribution
+ 
+---
+ 
+# Update Rules
+
+
+After each result, ratings `\(R_i\)` and `\(R_j\)` are updated according to the following rule:
+
+$$
+R_{new} = R_{old} + K * (Result - P_{ij})
+$$
+
+- Ratings always increase with wins and decrease with losses
+
+- `\(K\)` is the learning rate that determines how sensitive the system is to each new result
+
+- `\(K\)` can be a constant or a function of some other variables
+
+- `\(R_0\)` is usually set to 1500
+
+---
+
+# Elo in R
+
+Suppose we knew that `\(K=20\)` was a good choice. We can write a function to perform Elo updates in R like follows:
+
+
+
+```r
+elo &lt;- function(winners, losers) {
+		
+		win_prob &lt;- function(elo_a, elo_b) {
+		  return(1 / (1 + 10^((elo_b - elo_a) / 400)))
+		}
+		
+		lookup &lt;- function(name, list, default){
+			if(name %in% names(list)){
+				list[[name]]
+			}
+			else{
+				default
+			}
+		}
+
+		 ratings &lt;- list()
+	   		
+	   results &lt;- data.frame(
+	   						winner_elo = numeric(length(winners)), 
+	             loser_elo = numeric(length(winners))
+	   						)
+	
+	   for (i in seq_along(winners)) {
+	
+	   cur_winner &lt;- winners[i]
+	    cur_loser &lt;- losers[i]
+	
+	    winner_elo &lt;- lookup(cur_winner, ratings, 1500)
+	    loser_elo &lt;- lookup(cur_loser, ratings, 1500)
+	
+		  winner_prob &lt;- win_prob(winner_elo, loser_elo)
+		
+	    winner_update &lt;- 20 * (1 - winner_prob)
+	    loser_update &lt;- 20 * (0 - (1 - winner_prob)) 
+	    
+	    ratings[[cur_winner]] = winner_elo + winner_update 
+	    ratings[[cur_loser]] = loser_elo + loser_update 
+
+	    results$winner_elo[i] &lt;- ratings[[cur_winner]]
+	    results$loser_elo[i] &lt;- ratings[[cur_loser]]
+	  }
+
+return(results)
+}
+```
+
+---
+
+# Example: 2018 MLB
+
+Let's see what the Elo ratings for the MLB would show if we looked only from 2017 on.
+
+
+```r
+mlb_elo &lt;- mlb_elo %&gt;% filter(season &gt;= 2017) %&gt;%
+  dplyr::mutate(date = ymd(date)) %&gt;%
+  arrange(date)
+
+elo_2018 &lt;- elo(mlb_elo$team1, mlb_elo$team2)
+
+tail(cbind(mlb_elo[,c("team1", "team2")], elo_2018))
+```
+
+```
+##      team1 team2 winner_elo loser_elo
+## 4893   CIN   PIT   1482.684  1458.429
+## 4894   ANA   OAK   1518.611  1490.174
+## 4895   SFG   LAD   1527.055  1458.649
+## 4896   PHI   ATL   1508.852  1514.254
+## 4897   BOS   NYY   1549.884  1485.615
+## 4898   BAL   HOU   1523.464  1478.741
+```
+
+---
+
+# Summary
+
+- Paired comparisons are one of the most versatile tools for rating team/player strength in sport
+
+- The Bradley-Terry is a great entry way into paired comparison models and can be formulated as a regression problem
+
+- Elo is a special case of a paired comparison model that allows dynamic updating of ratings
+
+---
+
+
+# Resources
+
+- Cattelan, M, Varin, C and Firth, D (2013). Dynamic Bradley-Terry modelling of sports tournaments. Journal of the Royal Statistical Society C 62, 135–150.
+
+- Turner, H and Firth, D (2012). Bradley-Terry Models in R: The `BradleyTerry2` Package. Journal of Statistical Software 48(9), 1–21.
+
+- [Rating the Chess Rating system](http://www.academia.edu/download/32392938/rating_the_chess_rating_system.pdf)
+    </textarea>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function() {
+  var d = document, s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})();</script>
+
+<script type="text/x-mathjax-config">
+MathJax.Hub.Config({
+  tex2jax: {
+    skipTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+  }
+});
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://cdn.bootcss.com/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

@@ -1,0 +1,578 @@
+---
+title: "Part 3. Paired Comparisons"
+subtitle: "Sports Analytics with R"
+author: "MeDaScIn 2018"
+output:
+  xaringan::moon_reader:
+    css: ["default", "duke_color_pallettes_slides.css"]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+
+```{r setup, include = FALSE, message = FALSE}
+options(htmltools.dir.version = FALSE)
+
+library(dplyr)
+library(ggthemes)
+library(ggplot2)
+library(scales)
+library(htmlTable)
+library(lubridate)
+```
+
+
+
+# Sport Competition
+
+Whether it's two individuals or two teams, most sport competition comes down to a paired comparison. 
+
+![](dog_surf.gif)
+
+---
+
+# Win Ability
+
+- The 'comparison' of main interest in sport is a competitors ability to win
+
+- How competitors have fared against each other gives us the most direct information about their respective win abilities
+
+- The family of `paired comparison models` are useful tools for estimating that ability 
+
+
+![](lebron.gif)
+
+---
+
+# Question: Abilities
+
+- Suppose we have two competitors who are going to face each other
+
+- Further suppose we know that Competitor A has ability $\delta_A$ and Competitor B has ability $\delta_B$ 
+
+- What properties of $\delta_A$ and $\delta_B$ would make us favor one competitor over another?
+
+--
+
+Answer: We should favor the competitor with greater ability.
+
+
+---
+
+# Bradely-Terry-Luce
+
+.cbox[
+### One of the most popular paired comparison models is the Bradley-Terry-Luce model.
+]
+
+- Bradley-Terry-Luce encapsulates the idea that competition results tell us about the underlying abilities of the competitors.
+
+- Relative ability is modeled as a logistic function of wins:
+
+<br>
+
+$$
+P(Win_A = 1) = \frac{\exp{(\delta_A - \delta_B)}}{1 + \exp{(\delta_A - \delta_B)}}
+$$
+
+---
+
+# BTL Properties
+
+- Win expectations all come down to the difference in abilities
+
+- An equal difference, $\delta_A - \delta_B$, implies the same win expectation no matter the individual abilities of $A$ and $B$
+
+- Expectations are even when $\delta_A -\delta_B = 0$
+
+- Roughly +10% for every added difference in ability of 0.4
+
+---
+
+```{r echo = FALSE}
+BT <- function(delta){
+  exp(delta) / (1 + exp(delta))
+}
+
+data <- data.frame(
+  ability = seq(-2, 2, by = 0.1),
+  p = BT(seq(-2, 2, by = 0.1))
+)
+
+data %>%
+ggplot(aes(y = p * 100, x = ability)) +
+  geom_point(size = 2, col = "#1792d0") +
+  geom_line(size = 2, col = "#1792d0") +
+  theme_hc() + 
+  geom_hline(yintercept = 50, col = "red") + 
+  scale_y_continuous("BTL Win Expectation", breaks = scales::pretty_breaks(n = 10)) + 
+  scale_x_continuous("Ability Difference", breaks = scales::pretty_breaks(n = 10))
+```
+
+---
+
+# BTL in R
+
+- `BradleyTerry2` (authors Turner and Firth) is an R package for fitting BTL models
+
+- It uses maximum-likelihood to estimate competitor abilities
+
+- It can incorporate covariates
+
+- Other binary families can also be fit
+
+```{r eval = F}
+install.packages("BradleyTerry2")
+```
+
+---
+
+# Function BTm
+
+The main workhorse function for the BTL model is `BTm`. Here is the general syntax:
+
+```{r eval = F}
+BTM(outcome, player1, player2, ...)
+```
+
+- `outcome` is with respect to `player1`
+
+- `player1` must be a factor with same levels as `player2`
+
+- `player2` must be a factor with same levels as `player1`
+
+Note: The `outcome` is with respect to `player1`.
+
+---
+
+
+# English Premier League
+
+We can download the current standings for the EPL from the [www.football-data.co.uk](www.football-data.co.uk)
+
+```{r}
+football <- "http://www.football-data.co.uk/mmz4281/1718/E0.csv"
+
+data <- read.csv(football, stringsAsFactors = FALSE)
+```
+
+---
+
+# EPL Data
+
+Each row is a summary of a particular EPL game. The variables of interest are:
+
+- HomeTeam: The name of the home team
+
+- AwayTeam: The name of the away team
+
+- FTHG: Goals scored by home team
+
+- FTAG: Goals scored by away team
+
+---
+
+# Example: Basic BTL
+
+Below we derive an indicator for wins and losses and then fit a BTL using the `BTm` function.
+
+```{r message = FALSE}
+library(BradleyTerry2)
+
+data <- data %>%
+  dplyr::mutate(
+    outcome = as.numeric(FTHG > FTAG),
+    HomeTeam = factor(HomeTeam, levels = unique(c(HomeTeam, AwayTeam))),
+    AwayTeam = factor(AwayTeam, levels = levels(HomeTeam))
+  )
+
+
+
+fit <- BTm(outcome, HomeTeam, AwayTeam, 
+           data = data)
+```
+
+---
+
+# BTm Methods
+
+The result of `BTm` has all of the standard methods of `glm` models.
+
+- `print` : Model summary and point estimates of coefficients
+
+
+- `summary`: More detailed summary of estimates (including standard errors)
+
+- `plots`: Residual diagnostic plots
+
+---
+
+
+# Abilities
+
+A useful function for extracting the abilities on the log scale is with the function `BTabilities`.
+
+```{r}
+abilities <- BTabilities(fit) # Matrix of ability and StdErr
+
+abilities <- data.frame(
+  Team = rownames(abilities),
+  Ability = abilities[,1],
+  SE = abilities[,2]
+)
+
+abilities$Team <- factor(abilities$Team, 
+                        levels = abilities$Team[order(abilities$Ability)],
+                        order = T)
+```
+
+---
+
+```{r echo = FALSE}
+abilities %>%
+  ggplot(aes(y = Ability, ymin = Ability - 2 * SE, ymax = Ability + 2 * SE, x = Team)) + 
+  geom_pointrange(col = "#e5952c") + 
+  coord_flip() + 
+  theme_hc() + theme(text = element_text(size = 16)) + 
+  scale_y_continuous("Abilities") + 
+  scale_x_discrete("") + 
+  geom_hline(yintercept = 0, col = "red") + 
+  ggtitle("EPL Team Abilities - 2017/2018")
+```
+
+---
+
+# Question
+
+What are some of the shortcomings of our current model?
+
+--
+
+Some possibilities:
+
+- No home/away advantage
+
+- We treat ties as losses for Home team
+
+---
+
+# Home Advantage
+
+It is generally thought that a team gets a boost in their win expectations when playing at home. 
+
+To introduce a home advantage covariate, we need to restructure out dataset and add a covariate for each team factor. 
+
+```{r}
+data$Home <- data.frame(
+  Team = data$HomeTeam, 
+  at.home = 1
+)
+
+data$Away <- data.frame(
+  Team = data$AwayTeam, 
+  at.home = 0
+)
+```
+
+---
+
+# Home Advantage BTL
+
+Now we add the home advantage covariate (`at.home`) to the model, using the `formula` statement.
+
+
+```{r}
+fit <- BTm(outcome, Home, Away, 
+           data = data,
+           id = "Team", 
+           formula = ~ Team + at.home
+           )
+```
+
+---
+
+# Problem
+
+1. What does the `at.home` effect suggest about the home advantage in the 2017-2018 EPL?
+
+2. How do the abilities change compared to our previous fit without this advantage?
+
+---
+
+# Solution: Home Advantage Estimate
+
+```{r}
+summary(fit)$coef["at.home",]
+```
+
+---
+
+# Solution: Change In Abilities
+
+```{r echo = F}
+abilities2 <- BTabilities(fit) # Matrix of ability and StdErr
+
+abilities2 <- data.frame(
+  Team = rownames(abilities2),
+  Ability = abilities2[,1],
+  SE = abilities2[,2]
+)
+
+abilities$Type <- "Without Home Adv"
+abilities2$Type <- "With Home Adv"
+
+order <- levels(abilities$Team)
+
+abilities <- rbind(abilities, abilities2)
+
+abilities$Team <- factor(abilities$Team, 
+                        levels = order,
+                        order = T)
+
+abilities %>%
+  ggplot(aes(y = Ability, ymin = Ability - 2 * SE, ymax = Ability + 2 * SE, x = Team)) + 
+  geom_pointrange(aes(col = Type, group = Type), position = position_dodge(0.1)) + 
+  coord_flip() + 
+  scale_colour_tableau(name = "") + 
+  theme_hc() + theme(text = element_text(size = 16)) + 
+  scale_y_continuous("Abilities") + 
+  scale_x_discrete("") + 
+  geom_hline(yintercept = 0, col = "red") + 
+  ggtitle("EPL Team Abilities - 2017/2018")
+```
+
+---
+
+# Reverse Home Advantage?
+
+- Our results suggest that playing at home is actually a _disadvantage_.
+
+- This goes against all conventional thinking!
+
+- Could we have made a mistake somewhere?
+
+--
+
+It's because we haven't handled ties/draws properly and there are a lot of them.
+
+```{r}
+mean(data$FTHG == data$FTAG) # Frequency of draws
+```
+
+---
+
+# Problem: Effect of Ties
+
+- Fit a BTM + Home advantage excluding matches with ties
+
+- Determine the estimate of the home advantage
+
+- What do you conclude about the importance of handling ties for our model?
+
+---
+
+# Solution: Effect of Ties
+
+```{r}
+data$Home <- data$Away <- NULL
+
+data <- data %>% filter(FTHG != FTAG) # Remove ties
+
+data$Home <- data.frame(
+  Team = data$HomeTeam, 
+  at.home = 1
+)
+
+data$Away <- data.frame(
+  Team = data$AwayTeam, 
+  at.home = 0
+)
+
+fit <- BTm(outcome, Home, Away, 
+           data = data,
+           id = "Team", 
+           formula = ~ Team + at.home
+           )
+
+summary(fit)$coef["at.home",]
+```
+
+---
+
+# Dynamic Paired Comparisons
+
+- Our example paired comparison model assumed that the ability of teams was constant
+
+- It might be more reasonable to allow the ability of teams/players to update with new results
+
+- In other words, we want a way to estimate team/player ability _dynamically_
+
+
+---
+
+# Elo System
+
+The 'Elo' system is the most popular dynamic paired comparison model. It was developed for chess in the 1950s but is now used for rating competitors in many sports. 
+
+![](538.png)
+
+---
+
+# Elo Example: Major League Baseball
+
+```{r nfl-elo, echo = F, warning = T}
+file <- "https://projects.fivethirtyeight.com/mlb-api/mlb_elo.csv"
+
+mlb_elo <- read.csv(file, stringsAsFactors = F)
+```
+
+```{r echo = F, warning = F}
+lad_elo <- mlb_elo %>% filter(team1 == "LAD" | team2 == "LAD")
+
+lad_elo <- rbind(
+  lad_elo %>% select(date, team = team1, elo = elo1_post),
+  lad_elo %>% select(date, team = team2, elo = elo2_post)
+) %>%
+  dplyr::mutate(
+    date = ymd(date),
+    year = year(date)
+  )
+
+lad_elo %>%
+  filter(team == "LAD") %>%
+  ggplot(aes(y = elo, x = date)) + 
+  geom_line(col = "#0d3d69", size = 1.5) + 
+  scale_y_continuous("Elo Rating", breaks = scales::pretty_breaks(n = 6)) + 
+  scale_x_date("", date_breaks = "10 years", date_labels = "%Y") + 
+  theme_hc() + 
+  ggtitle("LA DODGERS", subtitle = "Source: FiveThirtyEight")
+```
+
+---
+
+# Elo System
+
+The standard Elo system predicts game/match results based on the rating difference of the competitors:
+
+$$
+P_{ij} = 1 / (1 + 10^{(R_j - R_i)/400})
+$$
+ - This is a logistic prediction (using base 10 instead of e)
+ 
+ - The 400 is an artifact of Elo's original system and is usually 2 SD of the rating difference distribution
+ 
+---
+ 
+# Update Rules
+
+
+After each result, ratings $R_i$ and $R_j$ are updated according to the following rule:
+
+$$R_{new} = R_{old} + K * (Result - P_{ij})$$
+
+- Ratings always increase with wins and decrease with losses
+
+- $K$ is the learning rate that determines how sensitive the system is to each new result
+
+- $K$ can be a constant or a function of some other variables
+
+- $R_0$ is usually set to 1500
+
+---
+
+# Elo in R
+
+Suppose we knew that $K=20$ was a good choice. We can write a function to perform Elo updates in R like follows:
+
+
+```{r}
+elo <- function(winners, losers) {
+		
+		win_prob <- function(elo_a, elo_b) {
+		  return(1 / (1 + 10^((elo_b - elo_a) / 400)))
+		}
+		
+		lookup <- function(name, list, default){
+			if(name %in% names(list)){
+				list[[name]]
+			}
+			else{
+				default
+			}
+		}
+
+		 ratings <- list()
+	   		
+	   results <- data.frame(
+	   						winner_elo = numeric(length(winners)), 
+	             loser_elo = numeric(length(winners))
+	   						)
+	
+	   for (i in seq_along(winners)) {
+	
+	   cur_winner <- winners[i]
+	    cur_loser <- losers[i]
+	
+	    winner_elo <- lookup(cur_winner, ratings, 1500)
+	    loser_elo <- lookup(cur_loser, ratings, 1500)
+	
+		  winner_prob <- win_prob(winner_elo, loser_elo)
+		
+	    winner_update <- 20 * (1 - winner_prob)
+	    loser_update <- 20 * (0 - (1 - winner_prob)) 
+	    
+	    ratings[[cur_winner]] = winner_elo + winner_update 
+	    ratings[[cur_loser]] = loser_elo + loser_update 
+
+	    results$winner_elo[i] <- ratings[[cur_winner]]
+	    results$loser_elo[i] <- ratings[[cur_loser]]
+	  }
+
+return(results)
+}
+
+```
+
+---
+
+# Example: 2018 MLB
+
+Let's see what the Elo ratings for the MLB would show if we looked only from 2017 on.
+
+```{r}
+mlb_elo <- mlb_elo %>% filter(season >= 2017) %>%
+  dplyr::mutate(
+    date = ymd(date),
+    winner = ifelse(score1 > score2, team1, team2),
+    loser = ifelse(score1 > score2, team2, team1)
+  ) %>%
+  arrange(date)
+
+elo_2018 <- elo(mlb_elo$winner, mlb_elo$loser)
+
+tail(cbind(mlb_elo[,c("winner", "loser")], elo_2018))
+```
+
+---
+
+# Summary
+
+- Paired comparisons are one of the most versatile tools for rating team/player strength in sport
+
+- The Bradley-Terry is a great entry way into paired comparison models and can be formulated as a regression problem
+
+- Elo is a special case of a paired comparison model that allows dynamic updating of ratings
+
+---
+
+
+# Resources
+
+- Cattelan, M, Varin, C and Firth, D (2013). Dynamic Bradley-Terry modelling of sports tournaments. Journal of the Royal Statistical Society C 62, 135–150.
+
+- Turner, H and Firth, D (2012). Bradley-Terry Models in R: The `BradleyTerry2` Package. Journal of Statistical Software 48(9), 1–21.
+
+- [Rating the Chess Rating system](http://www.academia.edu/download/32392938/rating_the_chess_rating_system.pdf)

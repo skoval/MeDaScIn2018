@@ -1,0 +1,631 @@
+---
+title: "Part 1. Web Scraping"
+subtitle: "Sports Analytics with R"
+author: "MeDaScIn 2018"
+output:
+  xaringan::moon_reader:
+    css: ["default", "duke_color_pallettes_slides.css"]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+
+```{r setup, include = FALSE, message = FALSE}
+options(htmltools.dir.version = FALSE)
+
+library(RSelenium)
+library(htmlTable)
+```
+
+
+# About Me
+
+.pull-left[
+- I'm a Data Scientist focusing on performance analysis in tennis
+
+- I work for Tennis Australia's Game Insight Group
+
+- I run a tennis stats blog [on-the-t.com](on-the-t.com)
+
+- I tweet about tennis and data science @StatsOnTheT
+]
+
+.pull-right[
+<img src="gig_logo_no_text.png" width=200 />
+]
+
+
+---
+
+
+# Tutorial Resources
+
+- Github: [github.com/skoval/MeDaScIn2018](https://github.com/skoval/MeDaScIn)
+
+- Contact: [skovalchik@tennis.com.au](skovalchik@tennis.com.au)
+
+---
+
+# Tutorial Outline
+
+Part 1. Web scraping
+
+Part 2. Pythagorean Expectation
+
+Part 3. Paired Comparisons
+
+Part 4. Hierarchical Models & Shrinkage
+
+Part 5. GAM
+
+
+---
+
+# Ways of Getting Sports Data
+
+As a sports statistician you will often need to gather data from the Web. Here are some common ways to get these data:
+
+--
+
+- <b>Import</b>. Read a data file directly from a Website
+
+--
+
+- <b>Scrape</b>. Pull data from the underlying source code in one of the following ways:
+
+  1. Extraction from HTML for static data
+  
+  2. Importing the underlying data objects for dynamic pages (if possible)
+  
+  3. Extraction through automated browsing for data that is generated dynamically
+
+---
+
+
+
+# Import Data File
+
+--
+
+- Some sports sites, like [Baseball-Reference.com](http://www.baseball-reference.com), provide tools for creating exportable reports.
+
+--
+
+- More generic sites like Kaggle and GitHub also can be a resource for downloadable sports data
+
+--
+
+- In general, we want to avoid manual data collection and automate wherever possible because: *automation = efficiency*
+
+--
+
+- Sports data that is on the Web as an importable file can be imported with `read.table` or similar import function in R if we can determine it's URL
+
+---
+
+
+# Example: Import Data File
+
+Here we extract the most recent Australian Open match results and betting odds using `read.csv`.
+
+```{r eval = FALSE}
+url <- "http://www.tennis-data.co.uk/2017/ausopen.csv"
+
+read.csv(url)
+```
+
+---
+
+
+
+# Practice: Import Data File
+
+How do you think you would obtain the same data from the last US Open? 
+
+--
+
+1. Give it a try.
+
+2. Read in the data.
+
+3. Determine the number of matches included.
+
+---
+
+# Solution: Import Data File
+
+To solve this one, we have to recognise patterns in the URL and see where we might request a different year and event.
+
+![](pattern_url.png)
+
+
+---
+
+# Solution: Import Data File
+
+
+```{r}
+url <- "http://www.tennis-data.co.uk/2018/usopen.csv"
+
+usopen <- read.csv(url)
+
+nrow(usopen) # Number of matches
+```
+
+---
+
+
+# Web Scraping
+
+<b>More often you will need to go "under the hood" and work directly with HTML/CSS to extract data from Websites.</b>
+
+--
+
+
+- Before you can extract the data, you need to understand the site design and how the data is contained in it
+
+--
+
+- This means getting familiar with "View Source" and "Developer Tools"
+
+--
+
+- I would recommend getting the "Developer" add-in with Google Chrome, which has an array of tools for inspecting the contents of Web Sites
+
+---
+
+
+
+# Viewing Source in Chrome
+
+![](view-source.png)
+
+---
+
+
+
+# Practice: Import Data File
+
+1. Navigate to http://www.basketball-reference.com/
+
+2. Use 'View Source' to find where the stats for the 'NBA Standings' are located
+
+3. What is the "id" associated with these data?
+
+
+---
+
+
+
+# Static vs Dynamic Data
+
+Understanding which tools you need to extract data from a Web site starts with determining if the data is _statically_ or _dynamically_ generated on the site.
+
+<br>
+
+.cbox[
+## Web data is _static_ if you can see it in the source code. If it isn't there, it's _dynamic_.
+]
+
+---
+
+# Practice: Static or Dynamic Data?
+
+1. Have a look at the Tennis Elo Ratings info at the following site:
+http://tennisabstract.com/reports/atp_elo_ratings.html
+
+2. Use View Source to determine if the Elo Ratings data are _static_ or _dynamic_.
+
+---
+
+# Solution: It's Static
+
+![](tennis_elo_ratings.png)
+
+
+---
+
+# Practice: Static or Dynamic Data?
+
+1. Now have a look at another _Tennis Astract_ page with stats on Roger Federer:
+http://www.tennisabstract.com/cgi-bin/player.cgi?p=RogerFederer
+
+2. Use View Source to determine if the Elo Ratings data are _static_ or _dynamic_.
+
+
+
+---
+
+# Solution: It's Dynamic
+
+![](tennis_abstract_federer.png)
+
+---
+
+
+
+# Scraping Static Data
+
+There are a few options for extracting static HTML data.
+
+1. `readLines` is an option if the data is _not_ nicely formatted, in other words, when there is a lack of structure
+
+2. More typically, the data is _nice_ (e.g. if it is contained in a HTML table or other predictable tag) and we can use scraping packages like `rvest` or `RCurl` to get the data in a format we can work with.
+
+---
+
+
+
+# Using `rvest`
+
+--
+
+- Suite of tools for scraping static Web data and putting them in easy-to-use objects (like data.frames)
+
+--
+
+- Works with `magrittr` and allows piping commands with `%>%` operator
+
+--
+
+- Allows some browsing functionality
+
+--
+
+- Authored by Hadley Wickham
+
+---
+
+
+
+# Example: Scraping Box Scores
+
+In this example, we will use `rvest` to extract the Eastern Division Standings.
+
+First, we import the page content.
+
+```{r message = FALSE}
+library('rvest')
+
+# Creating object with the address
+url <- 'http://www.basketball-reference.com/boxscores/'
+
+#Reading the code from the site
+webpage <- read_html(url)
+```
+
+---
+
+
+
+# Example: Scraping Box Scores
+
+The `html_nodes` function is the work horse function for extracting specific elements of a site. We can specify the element we want using its CSS tag or using an XPATH selector.
+
+```{r}
+# Using the CSS table tag to get all tables
+data <- webpage %>%
+   html_nodes(css = 'table') %>%
+   html_table()
+
+length(data) # List of multiple tables
+```
+
+
+---
+
+
+
+# Example: Scraping Box Scores
+
+Using an XPATH ([XML Path Language](https://en.wikipedia.org/wiki/XPath)) can help to make our extraction more specific, though the syntax is more opaque. 
+
+```{r}
+# Using an XPATH selector to get the specific table of interest
+data <- webpage %>%
+   html_nodes(xpath = '//*[@id="divs_standings_E"]') %>%
+   html_table(header = T)
+
+head(data[[1]])
+```
+
+
+---
+
+
+
+# Practice: Static Data Extraction
+
+Let's go back to the Elo ratings of male tennis players: [Tennis Abstract Elo](http://tennisabstract.com/reports/atp_elo_ratings.html)
+
+--
+
+1. Use your View Source tools to determine the element containing the ratings
+
+2. Use `rvest` to scrape the data as efficiently as you can
+
+---
+
+
+
+
+# Solution: Elo Rating Extraction
+
+![](tennis-elo.png)
+
+---
+
+
+
+
+# Solution: Elo Rating Extraction
+
+```{r}
+url <- "http://tennisabstract.com/reports/atp_elo_ratings.html"
+
+page <- read_html(url)
+
+# Use table class to extract Elo table
+elo <- page %>%
+    html_nodes("table.tablesorter") %>%
+    html_table()
+
+head(elo)
+```
+
+---
+
+# Handling Dynamic Data 
+
+- Because dynamic data is created on-the-fly we can't simply read from the HTML to get those data
+
+--
+
+- There are <b>two</b> main ways we can deal with this:
+
+  1. Sleuth the underlying data objects
+  
+  2. Use automated browsing to make the dynamic problem a static problem
+
+---
+
+# Sleuthing
+
+.pull-left[
+- Dynamic data has to come from somewhere. 
+
+- Usually data is stored in a server and made available to JS functions via JSON/XML files.
+
+- If we can find and access those data files, our scraping dilemma is essentially solved.
+]
+
+.pull-right[
+![](inspector_gadget.gif)
+]
+
+---
+
+# Sleuth Principles
+
+1. If data is dynamic, fire up "Developer Tools"
+
+2. Select XHR for (XML HTTP Request) [This is where events happen]
+
+3. Make an event by selecting the data of interest
+
+4. Review requests and look for JSON/XML content in the "Response" field
+
+---
+
+# Example: World Cup Data
+
+![](football_world_cup.png)
+
+
+---
+
+
+# Example: World Cup Data
+
+![](football_xhr.png)
+
+---
+
+# Importing the Data
+
+With a URL location for the data file, JSON in this case, we can easily read in these data to R.
+
+```{r size=10}
+library(jsonlite) # Reading JSON files
+
+url <- "https://www.sofascore.com/tournament/3958/15586/standings/tables/json?"
+
+data <- fromJSON(url)
+
+data$teamEvents[[1]]$total
+```
+
+---
+
+# XHR Patterns
+
+Using the XHR info to get at the data objects behind dynamic pages, the scraping problem largely reduces to:
+
+1. Identifying patterns in the XHR
+
+2. Parsing the resulting objects
+
+---
+
+# XHR Patterns
+
+
+What do I mean by XHR pattern? Consider our Brazil example...
+
+What if we want another WC group?
+
+```{r}
+url <- "https://www.sofascore.com/tournament/GROUP/15586/standings/tables/json?"
+
+data <- fromJSON(sub("GROUP", 3959, url))
+
+data$teamEvents[[1]]$total
+```
+
+
+---
+
+
+# Automated Browsing
+
+- Sadly, many dynamic sites will hide their backend data
+
+--
+
+- But we can still deal with this!
+
+--
+
+- We just need to find what instructions to give to mimic the browsing that generates the data and get familiar with tools that can implement these instructions
+
+
+---
+
+
+
+# RSelenium
+
+--
+
+- _Selenium_ is software that allows automated Web browsing
+
+--
+
+- [RSelenium](https://cran.r-project.org/web/packages/RSelenium/index.html) is a package that provides Selenium functionality in R
+
+![](selenium_rc.png)
+
+---
+
+
+
+# RSelenium Installation
+
+- Although you can install and run RSelenium locally, you can save yourself a lot of pain by using RSelenium through _docker_.
+
+- Once _docker_ is installed there are many images available that are already setup with Selenium : https://hub.docker.com/u/selenium/
+
+![](docker.png)
+
+---
+
+
+
+# RSelenium: Basic Steps
+
+1. Set the Web driver (select browser and port)
+
+2. Find the elements with the data
+
+3. Extract the content
+
+4. Parse the contents
+
+---
+
+
+
+# Setting Up Docker
+
+1. We will use the `selenium/standalone-chrome` docker image in our examples
+
+2. Once docker is running, we can initiate this image on port 4445 with the code shown at the bottom. 
+
+3. We can now use RSelenium on port 4445
+
+
+```{r eval=FALSE}
+docker run -d -p 4445:4444 selenium/standalone-chrome
+```
+
+---
+
+# Using RSelenium
+
+Take a look at the NFL Standings at: https://www.nfl.com/standings
+
+
+<div style="margin-left: 15%;">
+<img src="nfl_standings.png" width="80%" />
+</div>
+
+
+---
+
+
+# Using RSelenium
+
+Below we activate the driver on the designated docker port (using `L` to ensure it is treated as an integer)
+
+```{r, message = FALSE, eval = T}
+library(RSelenium) # Load the package
+
+url <- "https://www.nfl.com/standings"
+
+remDr <- remoteDriver(port = 4445L, browser = "chrome") # Establish driver
+remDr$open(silent = TRUE) # Supress any output messages
+remDr$navigate(url) # Navigate page
+```
+
+---
+
+# Using RSelenium
+
+Inspection of the source code suggests that the Element with `class` *rsv-ae9db127* is likely to contain the statistics about game results. To isolate that element we use `findElements`.
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=30), eval = T}
+webElem <- remDr$findElements(using = 'class', "rsv-ae9db127")
+```
+
+---
+
+# Using RSelenium
+
+Once we have isolated the elements of interest, we can extract info about its attributes or (most importantly) the text embedded in those elements. 
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=30), eval = T}
+#  Use getElementText to extract the text from this element
+unlist(lapply(webElem, function(x){x$getElementText()}))[29:35]
+
+remDr$close() # Close driver when finished
+```
+
+---
+
+
+
+# Summary
+
+- Web data can be classed into three main categories: directly importable, static, or dynamic
+
+- We can use Web developer tools to determine which data type we are working with and the site elements that contain the data
+
+- We have seen how we use tools like `rvest` to capture static Web data
+
+- For dynamic data, we can use automated browsing with `RSelenium` 
+
+---
+
+
+# Resources
+
+- [XPATH: https://www.w3schools.com/xml/xpath_intro.asp](https://www.w3schools.com/xml/xpath_intro.asp)
+
+- [rvest: https://www.r-bloggers.com/rvest-easy-web-scraping-with-r/](https://www.r-bloggers.com/rvest-easy-web-scraping-with-r/)
+
+- [RSelenium: https://ropensci.org/tutorials/rselenium_tutorial.html](https://ropensci.org/tutorials/rselenium_tutorial.html)
+
+- [docker: https://ropenscilabs.github.io/r-docker-tutorial/](https://ropenscilabs.github.io/r-docker-tutorial/)
