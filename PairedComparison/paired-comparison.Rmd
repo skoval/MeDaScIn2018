@@ -491,7 +491,7 @@ Suppose we knew that $K=20$ was a good choice. We can write a function to perfor
 ```{r}
 elo <- function(winners, losers) {
 		
-		win_prob <- function(elo_a, elo_b) {
+  	win_prob <- function(elo_a, elo_b) {
 		  return(1 / (1 + 10^((elo_b - elo_a) / 400)))
 		}
 		
@@ -508,7 +508,7 @@ elo <- function(winners, losers) {
 	   		
 	   results <- data.frame(
 	   						winner_elo = numeric(length(winners)), 
-	             loser_elo = numeric(length(winners))
+	              loser_elo = numeric(length(winners))
 	   						)
 	
 	   for (i in seq_along(winners)) {
@@ -549,6 +549,7 @@ mlb_elo <- mlb_elo %>% filter(season >= 2017) %>%
     winner = ifelse(score1 > score2, team1, team2),
     loser = ifelse(score1 > score2, team2, team1)
   ) %>%
+  filter(!is.na(score1)) %>%
   arrange(date)
 
 elo_2018 <- elo(mlb_elo$winner, mlb_elo$loser)

@@ -208,9 +208,10 @@ abilities &lt;- data.frame(
   SE = abilities[,2]
 )
 
-abilities$Team &lt;- factor(abilities$Team, 
-                        levels = abilities$Team[order(abilities$Ability)],
-                        order = T)
+abilities$Team &lt;-
+    factor(abilities$Team,
+           levels = abilities$Team[order(abilities$Ability)],
+            order = T)
 ```
 
 ---
@@ -388,12 +389,7 @@ The 'Elo' system is the most popular dynamic paired comparison model. It was dev
 
 
 
-
-```
-## Warning: Removed 9 rows containing missing values (geom_path).
-```
-
-![](paired-comparison_files/figure-html/unnamed-chunk-14-1.png)&lt;!-- --&gt;
+<img src="paired-comparison_files/figure-html/unnamed-chunk-14-1.png" width=700 height=400 />
 
 ---
 
@@ -415,9 +411,7 @@ $$
 
 After each result, ratings `\(R_i\)` and `\(R_j\)` are updated according to the following rule:
 
-$$
-R_{new} = R_{old} + K * (Result - P_{ij})
-$$
+`$$R_{new} = R_{old} + K * (Result - P_{ij})$$`
 
 - Ratings always increase with wins and decrease with losses
 
@@ -436,26 +430,31 @@ Suppose we knew that `\(K=20\)` was a good choice. We can write a function to pe
 
 
 ```r
-elo &lt;- function(winners, losers) {
-		
-		win_prob &lt;- function(elo_a, elo_b) {
-		  return(1 / (1 + 10^((elo_b - elo_a) / 400)))
-		}
-		
-		lookup &lt;- function(name, list, default){
-			if(name %in% names(list)){
-				list[[name]]
-			}
-			else{
-				default
-			}
-		}
+win_prob &lt;- function(elo_a, elo_b) {
+    return(1 / (1 + 10^((elo_b - elo_a) / 400)))
+}
 
-		 ratings &lt;- list()
+lookup &lt;- function(name, list, default){
+    if(name %in% names(list)){
+            list[[name]]
+        }
+        else{
+            default
+            }
+}
+```
+
+---
+
+
+```r
+elo &lt;- function(winners, losers) {
+
+       ratings &lt;- list()
 	   		
 	   results &lt;- data.frame(
-	   						winner_elo = numeric(length(winners)), 
-	             loser_elo = numeric(length(winners))
+                  winner_elo = numeric(length(winners)),
+	              loser_elo = numeric(length(winners))
 	   						)
 	
 	   for (i in seq_along(winners)) {
@@ -466,7 +465,7 @@ elo &lt;- function(winners, losers) {
 	    winner_elo &lt;- lookup(cur_winner, ratings, 1500)
 	    loser_elo &lt;- lookup(cur_loser, ratings, 1500)
 	
-		  winner_prob &lt;- win_prob(winner_elo, loser_elo)
+        winner_prob &lt;- win_prob(winner_elo, loser_elo)
 		
 	    winner_update &lt;- 20 * (1 - winner_prob)
 	    loser_update &lt;- 20 * (0 - (1 - winner_prob)) 
@@ -491,22 +490,27 @@ Let's see what the Elo ratings for the MLB would show if we looked only from 201
 
 ```r
 mlb_elo &lt;- mlb_elo %&gt;% filter(season &gt;= 2017) %&gt;%
-  dplyr::mutate(date = ymd(date)) %&gt;%
+  dplyr::mutate(
+    date = ymd(date),
+    winner = ifelse(score1 &gt; score2, team1, team2),
+    loser = ifelse(score1 &gt; score2, team2, team1)
+  ) %&gt;%
+  filter(!is.na(score1)) %&gt;%
   arrange(date)
 
-elo_2018 &lt;- elo(mlb_elo$team1, mlb_elo$team2)
+elo_2018 &lt;- elo(mlb_elo$winner, mlb_elo$loser)
 
-tail(cbind(mlb_elo[,c("team1", "team2")], elo_2018))
+tail(cbind(mlb_elo[,c("winner", "loser")], elo_2018))
 ```
 
 ```
-##      team1 team2 winner_elo loser_elo
-## 4893   CIN   PIT   1482.684  1458.429
-## 4894   ANA   OAK   1518.611  1490.174
-## 4895   SFG   LAD   1527.055  1458.649
-## 4896   PHI   ATL   1508.852  1514.254
-## 4897   BOS   NYY   1549.884  1485.615
-## 4898   BAL   HOU   1523.464  1478.741
+##      winner loser winner_elo loser_elo
+## 4751    DET   KCR   1419.892  1409.873
+## 4752    CHW   CLE   1440.016  1519.861
+## 4753    TOR   TBD   1474.674  1617.448
+## 4754    NYM   WSN   1510.483  1497.795
+## 4755    BOS   NYY   1619.362  1524.459
+## 4756    OAK   ANA   1609.696  1494.189
 ```
 
 ---

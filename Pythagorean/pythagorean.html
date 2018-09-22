@@ -35,7 +35,7 @@ One of the major tasks of a sports statistician is setting expectations for futu
 
 A simple yet powerful method for estimating win expectations is the _Pythagorean Expectation_.
 
-![](bill_james_pythag.png)
+<img src="bill_james_pythag.png" width="700" />
 
 ---
 
@@ -101,11 +101,14 @@ nba_scores &lt;- function(url){
 	
 	data &lt;- data[,c(1, 3:6)]
 	
-	names(data) &lt;- c("Date", "Visitor", "Visitor.Pts", "Home", "Home.Pts")
+	names(data) &lt;- c("Date", "Visitor", "Visitor.Pts",
+        "Home", "Home.Pts")
 	
 	result &lt;- rbind(
-		data %&gt;% select(Date, Team = Visitor, Opponent = Home, Pts = Visitor.Pts, OpponentPts = Home.Pts),
-		data %&gt;% select(Date, Team = Home, Opponent = Visitor, Pts = Home.Pts, OpponentPts = Visitor.Pts)
+		data %&gt;% select(Date, Team = Visitor, Opponent = Home,
+            Pts = Visitor.Pts, OpponentPts = Home.Pts),
+		data %&gt;% select(Date, Team = Home, Opponent = Visitor,
+            Pts = Home.Pts, OpponentPts = Visitor.Pts)
 	)
 	
 	result$Date &lt;- mdy(result$Date)
@@ -127,7 +130,8 @@ library(dplyr)
 library(lubridate)
 library(rvest)
 
-url &lt;- "https://www.basketball-reference.com/leagues/NBA_2017_games-month.html"
+url &lt;-
+ "https://www.basketball-reference.com/leagues/NBA_2017_games-month.html"
 
 # Regular season
 months &lt;- tolower(month.name)
@@ -159,6 +163,11 @@ data %&gt;%
                   col = "lightgrey") +
   theme_hc()
 ```
+
+---
+
+# Explore Points Won and Lost
+
 
 ![](pythagorean_files/figure-html/unnamed-chunk-3-1.png)&lt;!-- --&gt;
 

@@ -838,7 +838,8 @@ With a URL location for the data file, JSON in this case, we can easily read in 
 ```r
 library(jsonlite) # Reading JSON files
 
-url &lt;- "https://www.sofascore.com/tournament/3958/15586/standings/tables/json?"
+url &lt;-
+ "https://www.sofascore.com/tournament/3958/15586/standings/tables/json?"
 
 data &lt;- fromJSON(url)
 
@@ -877,7 +878,8 @@ What if we want another WC group?
 
 
 ```r
-url &lt;- "https://www.sofascore.com/tournament/GROUP/15586/standings/tables/json?"
+url &lt;-
+ "https://www.sofascore.com/tournament/GROUP/15586/standings/tables/json?"
 
 data &lt;- fromJSON(sub("GROUP", 3959, url))
 
@@ -997,7 +999,8 @@ library(RSelenium) # Load the package
 
 url &lt;- "https://www.nfl.com/standings"
 
-remDr &lt;- remoteDriver(port = 4445L, browser = "chrome") # Establish driver
+remDr &lt;- remoteDriver(port = 4445L, browser = "chrome")
+    # Establish driver
 remDr$open(silent = TRUE) # Supress any output messages
 remDr$navigate(url) # Navigate page
 ```
